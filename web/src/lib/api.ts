@@ -224,20 +224,60 @@ export type UserKey = {
   enabled: boolean;
   created_at: string | null;
   last_used_at: string | null;
-  quota: number;
-  used: number;
-  unlimited: boolean;
-  remaining: number | null;
+  image_daily_quota: number;
+  image_daily_used: number;
+  image_daily_unlimited: boolean;
+  image_daily_remaining: number | null;
+  image_monthly_quota: number;
+  image_monthly_used: number;
+  image_monthly_unlimited: boolean;
+  image_monthly_remaining: number | null;
+  image_total_quota: number;
+  image_total_used: number;
+  image_total_unlimited: boolean;
+  image_total_remaining: number | null;
+  chat_daily_quota: number;
+  chat_daily_used: number;
+  chat_daily_unlimited: boolean;
+  chat_daily_remaining: number | null;
+  chat_monthly_quota: number;
+  chat_monthly_used: number;
+  chat_monthly_unlimited: boolean;
+  chat_monthly_remaining: number | null;
+  chat_total_quota: number;
+  chat_total_used: number;
+  chat_total_unlimited: boolean;
+  chat_total_remaining: number | null;
 };
 
 export type AuthIdentity = {
   id: string;
   name: string;
   role: AuthRole;
-  quota: number;
-  used: number;
-  unlimited: boolean;
-  remaining: number | null;
+  image_daily_quota: number;
+  image_daily_used: number;
+  image_daily_unlimited: boolean;
+  image_daily_remaining: number | null;
+  image_monthly_quota: number;
+  image_monthly_used: number;
+  image_monthly_unlimited: boolean;
+  image_monthly_remaining: number | null;
+  image_total_quota: number;
+  image_total_used: number;
+  image_total_unlimited: boolean;
+  image_total_remaining: number | null;
+  chat_daily_quota: number;
+  chat_daily_used: number;
+  chat_daily_unlimited: boolean;
+  chat_daily_remaining: number | null;
+  chat_monthly_quota: number;
+  chat_monthly_used: number;
+  chat_monthly_unlimited: boolean;
+  chat_monthly_remaining: number | null;
+  chat_total_quota: number;
+  chat_total_used: number;
+  chat_total_unlimited: boolean;
+  chat_total_remaining: number | null;
 };
 
 export type RegisterConfig = {
@@ -576,28 +616,68 @@ export async function fetchMyIdentity() {
   return httpRequest<{ identity: AuthIdentity }>("/api/auth/me");
 }
 
-export async function createUserKey(payload: { name?: string; quota?: number; unlimited?: boolean }) {
+export type UserKeyCreatePayload = {
+  name?: string;
+  image_daily_quota?: number;
+  image_daily_unlimited?: boolean;
+  image_monthly_quota?: number;
+  image_monthly_unlimited?: boolean;
+  image_total_quota?: number;
+  image_total_unlimited?: boolean;
+  chat_daily_quota?: number;
+  chat_daily_unlimited?: boolean;
+  chat_monthly_quota?: number;
+  chat_monthly_unlimited?: boolean;
+  chat_total_quota?: number;
+  chat_total_unlimited?: boolean;
+};
+
+export type UserKeyUpdatePayload = {
+  enabled?: boolean;
+  name?: string;
+  key?: string;
+  image_daily_quota?: number;
+  image_daily_unlimited?: boolean;
+  image_monthly_quota?: number;
+  image_monthly_unlimited?: boolean;
+  image_total_quota?: number;
+  image_total_unlimited?: boolean;
+  chat_daily_quota?: number;
+  chat_daily_unlimited?: boolean;
+  chat_monthly_quota?: number;
+  chat_monthly_unlimited?: boolean;
+  chat_total_quota?: number;
+  chat_total_unlimited?: boolean;
+  reset_image_daily_used?: boolean;
+  reset_image_monthly_used?: boolean;
+  reset_image_total_used?: boolean;
+  reset_chat_daily_used?: boolean;
+  reset_chat_monthly_used?: boolean;
+  reset_chat_total_used?: boolean;
+};
+
+export async function createUserKey(payload: UserKeyCreatePayload) {
   return httpRequest<{ item: UserKey; key: string; items: UserKey[] }>("/api/auth/users", {
     method: "POST",
     body: {
       name: payload.name ?? "",
-      quota: Math.max(0, Number(payload.quota ?? 0) || 0),
-      unlimited: Boolean(payload.unlimited),
+      image_daily_quota: Math.max(0, Number(payload.image_daily_quota ?? 0) || 0),
+      image_daily_unlimited: payload.image_daily_unlimited ?? true,
+      image_monthly_quota: Math.max(0, Number(payload.image_monthly_quota ?? 0) || 0),
+      image_monthly_unlimited: payload.image_monthly_unlimited ?? true,
+      image_total_quota: Math.max(0, Number(payload.image_total_quota ?? 0) || 0),
+      image_total_unlimited: Boolean(payload.image_total_unlimited),
+      chat_daily_quota: Math.max(0, Number(payload.chat_daily_quota ?? 0) || 0),
+      chat_daily_unlimited: payload.chat_daily_unlimited ?? true,
+      chat_monthly_quota: Math.max(0, Number(payload.chat_monthly_quota ?? 0) || 0),
+      chat_monthly_unlimited: payload.chat_monthly_unlimited ?? true,
+      chat_total_quota: Math.max(0, Number(payload.chat_total_quota ?? 0) || 0),
+      chat_total_unlimited: payload.chat_total_unlimited ?? true,
     },
   });
 }
 
-export async function updateUserKey(
-  keyId: string,
-  updates: {
-    enabled?: boolean;
-    name?: string;
-    key?: string;
-    quota?: number;
-    unlimited?: boolean;
-    reset_used?: boolean;
-  },
-) {
+export async function updateUserKey(keyId: string, updates: UserKeyUpdatePayload) {
   return httpRequest<{ item: UserKey; items: UserKey[] }>(`/api/auth/users/${keyId}`, {
     method: "POST",
     body: updates,

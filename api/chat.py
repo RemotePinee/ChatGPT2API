@@ -9,7 +9,7 @@ from fastapi import APIRouter, Header, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from api.support import require_identity
+from api.support import consume_user_chat_quota, refund_user_chat_quota, require_identity
 from services.chat_service import chat_service
 from services.protocol.conversation import (
     ConversationRequest,
@@ -83,12 +83,14 @@ def _resolve_preferred_token(user_id: str, upstream_cid: str) -> str:
     return chat_service.find_token_by_upstream(user_id, upstream_cid)
 
 
-def _stream(body: ChatStreamRequest, user_id: str) -> Iterator[str]:
+def _stream(body: ChatStreamRequest, identity: dict[str, Any]) -> Iterator[str]:
     """把内部 conversation.* 事件薄薄一层映射成 SSE。
     收尾时无论上游成功失败都异步 DELETE，避免在用户号下留下"临时聊天"痕迹；
     同时把 (cid, token) 存到 token cache，前端落库时再回填，用于换号续聊。
     每轮都开新上游 cid，历史靠 messages 全量带回去；这样和 done 后的异步 DELETE
-    不冲突，也避免上游因 parent_message_id 不连续而 404。"""
+    不冲突，也避免上游因 parent_message_id 不连续而 404。
+    入口处已经预扣 1 份对话额度；上游真失败（一个字也没吐出来）时退回。"""
+    user_id = str(identity.get("id") or "")
     request = ConversationRequest(model=body.model, messages=body.messages or None)
     upstream_cid_in = str(body.conversation_id or "").strip()
     preferred_token = "" if body.force_switch_account else _resolve_preferred_token(user_id, upstream_cid_in)
@@ -99,6 +101,7 @@ def _stream(body: ChatStreamRequest, user_id: str) -> Iterator[str]:
             excluded.add(prev)
     conversation_id = ""
     account_token = ""
+    delivered_any = False
     try:
         for event in stream_chat_events(
             request,
@@ -114,10 +117,15 @@ def _stream(body: ChatStreamRequest, user_id: str) -> Iterator[str]:
             if etype == "conversation.delta":
                 delta = str(event.get("delta") or "")
                 if delta:
+                    delivered_any = True
                     yield _sse({"type": "delta", "text": delta})
             elif etype == "conversation.done":
                 yield _sse({"type": "done"})
     except Exception as exc:
+        # 一个字都没吐出来就挂了，按"真失败"退回预扣的 1 份。
+        # 已经吐过 token 的中途断流不退——用户已经拿到了价值。
+        if not delivered_any:
+            refund_user_chat_quota(identity, 1)
         yield _sse({"type": "error", "message": str(exc)})
     finally:
         if account_token and conversation_id:
@@ -138,7 +146,10 @@ def create_router() -> APIRouter:
         identity = require_identity(authorization)
         if not body.messages:
             raise HTTPException(status_code=400, detail={"error": "messages is required"})
-        return StreamingResponse(_stream(body, str(identity.get("id") or "")), media_type="text/event-stream")
+        # 入口处预扣 1 份对话额度；任一档（日 / 月 / 总）不足都直接 402。
+        # 上游真失败（一个字未吐出）时由 _stream 内部退回。
+        consume_user_chat_quota(identity, 1)
+        return StreamingResponse(_stream(body, identity), media_type="text/event-stream")
 
     @router.get("/api/chat/conversations")
     async def list_conversations(authorization: str | None = Header(default=None)):

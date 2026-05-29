@@ -58,21 +58,21 @@ def raise_image_quota_error(exc: Exception) -> None:
 
 
 def consume_user_quota(identity: dict[str, object], amount: int) -> None:
-    """画图入口处扣减用户密钥额度。admin / unlimited 直接放行；
+    """画图入口处扣减用户密钥的画图额度。admin / image_unlimited 直接放行；
     普通用户额度不足直接 402，让前端把按钮禁用并提示联系管理员加额度。"""
     role = str(identity.get("role") or "").strip().lower()
     item_id = str(identity.get("id") or "").strip()
     if role == "admin" or not item_id or item_id == "admin":
         return
-    result = auth_service.consume_quota(item_id, max(1, int(amount or 1)))
+    result = auth_service.consume_image_quota(item_id, max(1, int(amount or 1)))
     if not result.get("ok"):
-        reason = str(result.get("reason") or "额度不足")
+        reason = str(result.get("reason") or "画图额度不足")
         raise HTTPException(status_code=402, detail={"error": reason})
 
 
 def refund_user_quota(identity: dict[str, object], amount: int) -> None:
-    """画图上游真失败时把预扣的额度退回去。
-    与 [consume_user_quota] 对称：admin / unlimited 直接 noop。
+    """画图上游真失败时把预扣的画图额度退回去。
+    与 [consume_user_quota] 对称：admin / image_unlimited 直接 noop。
 
     调用时机限定在"上游真实失败"分支（content_policy / 5xx / 上游超时 / 任务取消）。
     用户输入错误（400 / 文本审查不过）走 fail-fast 路径，已经在扣费前就 raise，
@@ -84,9 +84,35 @@ def refund_user_quota(identity: dict[str, object], amount: int) -> None:
     if role == "admin" or not item_id or item_id == "admin":
         return
     try:
-        auth_service.refund_quota(item_id, max(1, int(amount or 1)))
+        auth_service.refund_image_quota(item_id, max(1, int(amount or 1)))
     except Exception:
         # 退款失败也不抛——主流程已经在返回错误响应了，再叠一个错误更糟
+        pass
+
+
+def consume_user_chat_quota(identity: dict[str, object], amount: int = 1) -> None:
+    """对话入口处扣减用户密钥的对话额度（日 / 月 / 总同时扣）。
+    admin 直接放行；任一档剩余不够直接 402，让前端把发送按钮禁用并提示用户。"""
+    role = str(identity.get("role") or "").strip().lower()
+    item_id = str(identity.get("id") or "").strip()
+    if role == "admin" or not item_id or item_id == "admin":
+        return
+    result = auth_service.consume_chat_quota(item_id, max(1, int(amount or 1)))
+    if not result.get("ok"):
+        reason = str(result.get("reason") or "对话额度不足")
+        raise HTTPException(status_code=402, detail={"error": reason})
+
+
+def refund_user_chat_quota(identity: dict[str, object], amount: int = 1) -> None:
+    """对话上游真失败（连接失败 / 上游 5xx）时把预扣的对话额度退回去。
+    任何异常吞掉：退款失败不该影响错误响应本身。"""
+    role = str(identity.get("role") or "").strip().lower()
+    item_id = str(identity.get("id") or "").strip()
+    if role == "admin" or not item_id or item_id == "admin":
+        return
+    try:
+        auth_service.refund_chat_quota(item_id, max(1, int(amount or 1)))
+    except Exception:
         pass
 
 

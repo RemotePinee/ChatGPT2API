@@ -27,17 +27,42 @@ from services.sub2api_service import (
 
 class UserKeyCreateRequest(BaseModel):
     name: str = ""
-    quota: int = 0
-    unlimited: bool = False
+    image_daily_quota: int = 0
+    image_daily_unlimited: bool = True
+    image_monthly_quota: int = 0
+    image_monthly_unlimited: bool = True
+    image_total_quota: int = 0
+    image_total_unlimited: bool = False
+    chat_daily_quota: int = 0
+    chat_daily_unlimited: bool = True
+    chat_monthly_quota: int = 0
+    chat_monthly_unlimited: bool = True
+    chat_total_quota: int = 0
+    chat_total_unlimited: bool = True
 
 
 class UserKeyUpdateRequest(BaseModel):
     name: str | None = None
     enabled: bool | None = None
     key: str | None = None
-    quota: int | None = None
-    unlimited: bool | None = None
-    reset_used: bool | None = None
+    image_daily_quota: int | None = None
+    image_daily_unlimited: bool | None = None
+    image_monthly_quota: int | None = None
+    image_monthly_unlimited: bool | None = None
+    image_total_quota: int | None = None
+    image_total_unlimited: bool | None = None
+    chat_daily_quota: int | None = None
+    chat_daily_unlimited: bool | None = None
+    chat_monthly_quota: int | None = None
+    chat_monthly_unlimited: bool | None = None
+    chat_total_quota: int | None = None
+    chat_total_unlimited: bool | None = None
+    reset_image_daily_used: bool | None = None
+    reset_image_monthly_used: bool | None = None
+    reset_image_total_used: bool | None = None
+    reset_chat_daily_used: bool | None = None
+    reset_chat_monthly_used: bool | None = None
+    reset_chat_total_used: bool | None = None
 
 
 class AccountCreateRequest(BaseModel):
@@ -107,24 +132,31 @@ def create_router() -> APIRouter:
 
     @router.get("/api/auth/me")
     async def get_my_identity(response: Response, authorization: str | None = Header(default=None)):
-        # 余额会随每次画图动态变化，不能让浏览器/SPA 兜底 HTML 缓存住，
+        # 余额会随每次画图 / 对话动态变化，不能让浏览器/SPA 兜底 HTML 缓存住，
         # 否则前端永远显示老值。明确禁止任何中间层缓存。
         response.headers["Cache-Control"] = "no-store"
         identity = require_identity(authorization)
-        # admin 走 _legacy_admin_identity 不走 auth_service，没 id；前端按 unlimited=True 处理。
+        # admin 走 _legacy_admin_identity 不走 auth_service，没 id；前端按全档 unlimited=True 处理。
         item_id = str(identity.get("id") or "").strip()
         if not item_id or item_id == "admin":
-            return {
-                "identity": {
-                    "id": item_id,
-                    "name": identity.get("name"),
-                    "role": identity.get("role"),
-                    "quota": 0,
-                    "used": 0,
-                    "unlimited": True,
-                    "remaining": None,
-                }
+            payload: dict[str, object] = {
+                "id": item_id,
+                "name": identity.get("name"),
+                "role": identity.get("role"),
             }
+            for kind in (
+                "image_daily",
+                "image_monthly",
+                "image_total",
+                "chat_daily",
+                "chat_monthly",
+                "chat_total",
+            ):
+                payload[f"{kind}_quota"] = 0
+                payload[f"{kind}_used"] = 0
+                payload[f"{kind}_unlimited"] = True
+                payload[f"{kind}_remaining"] = None
+            return {"identity": payload}
         record = auth_service.get_by_id(item_id)
         if record is None:
             raise HTTPException(status_code=404, detail={"error": "用户不存在"})
@@ -137,8 +169,18 @@ def create_router() -> APIRouter:
             item, raw_key = auth_service.create_key(
                 role="user",
                 name=body.name,
-                quota=max(0, int(body.quota or 0)),
-                unlimited=bool(body.unlimited),
+                image_daily_quota=max(0, int(body.image_daily_quota or 0)),
+                image_daily_unlimited=bool(body.image_daily_unlimited),
+                image_monthly_quota=max(0, int(body.image_monthly_quota or 0)),
+                image_monthly_unlimited=bool(body.image_monthly_unlimited),
+                image_total_quota=max(0, int(body.image_total_quota or 0)),
+                image_total_unlimited=bool(body.image_total_unlimited),
+                chat_daily_quota=max(0, int(body.chat_daily_quota or 0)),
+                chat_daily_unlimited=bool(body.chat_daily_unlimited),
+                chat_monthly_quota=max(0, int(body.chat_monthly_quota or 0)),
+                chat_monthly_unlimited=bool(body.chat_monthly_unlimited),
+                chat_total_quota=max(0, int(body.chat_total_quota or 0)),
+                chat_total_unlimited=bool(body.chat_total_unlimited),
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
@@ -151,18 +193,13 @@ def create_router() -> APIRouter:
             authorization: str | None = Header(default=None),
     ):
         require_admin(authorization)
-        updates = {
-            key: value
-            for key, value in {
-                "name": body.name,
-                "enabled": body.enabled,
-                "key": body.key,
-                "quota": body.quota,
-                "unlimited": body.unlimited,
-                "reset_used": body.reset_used,
-            }.items()
-            if value is not None
-        }
+        candidate = body.model_dump(exclude_none=True)
+        # 名称和 key 不能为空字符串触发改动；其余 bool / int 全部按字面值透传到 service。
+        updates: dict[str, object] = {key: value for key, value in candidate.items() if key not in {"name", "key"}}
+        if "name" in candidate:
+            updates["name"] = candidate["name"]
+        if "key" in candidate:
+            updates["key"] = candidate["key"]
         if not updates:
             raise HTTPException(status_code=400, detail={"error": "还没有检测到改动，请修改后再保存"})
         try:

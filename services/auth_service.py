@@ -4,7 +4,7 @@ import hashlib
 import hmac
 import secrets
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from threading import Lock
 from typing import Literal
 
@@ -12,6 +12,25 @@ from services.config import config
 from services.storage.base import StorageBackend
 
 AuthRole = Literal["admin", "user"]
+QuotaKind = Literal[
+    "image_daily",
+    "image_monthly",
+    "image_total",
+    "chat_daily",
+    "chat_monthly",
+    "chat_total",
+]
+
+# 画图 / 对话各自三档：日、月、总。一次扣费会同时落到这三档；任一档用完都拒绝。
+# 总档不参与跨周期重置，日 / 月 在跨自然日 / 月时把 used 清零。
+_IMAGE_KINDS: tuple[QuotaKind, ...] = ("image_daily", "image_monthly", "image_total")
+_CHAT_KINDS: tuple[QuotaKind, ...] = ("chat_daily", "chat_monthly", "chat_total")
+_PERIODIC_KINDS: tuple[QuotaKind, ...] = (
+    "image_daily",
+    "image_monthly",
+    "chat_daily",
+    "chat_monthly",
+)
 
 
 def _now_iso() -> str:
@@ -20,6 +39,25 @@ def _now_iso() -> str:
 
 def _hash_key(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _today_key() -> str:
+    """服务器本地时区自然日，用于日额度跨天判断。"""
+    return date.today().isoformat()
+
+
+def _this_month_key() -> str:
+    """服务器本地时区自然月，用于月额度跨月判断。"""
+    today = date.today()
+    return f"{today.year:04d}-{today.month:02d}"
+
+
+def _is_daily_kind(kind: QuotaKind) -> bool:
+    return kind.endswith("_daily")
+
+
+def _is_monthly_kind(kind: QuotaKind) -> bool:
+    return kind.endswith("_monthly")
 
 
 class AuthService:
@@ -44,6 +82,12 @@ class AuthService:
         except (TypeError, ValueError):
             return default
 
+    @staticmethod
+    def _coerce_bool(value: object, default: bool = False) -> bool:
+        if value is None:
+            return default
+        return bool(value)
+
     def _normalize_item(self, raw: object) -> dict[str, object] | None:
         if not isinstance(raw, dict):
             return None
@@ -57,6 +101,72 @@ class AuthService:
         name = self._clean(raw.get("name")) or self._default_name(role)
         created_at = self._clean(raw.get("created_at")) or _now_iso()
         last_used_at = self._clean(raw.get("last_used_at")) or None
+
+        # 画图三档迁移规则：
+        #   - 已经有 image_total_quota 字段：当前格式，原样读取。
+        #   - 否则 image_quota / quota（旧一次性总额度）→ image_total_quota，日 / 月默认不限额。
+        #   - 三档默认不限的存量用户继续保持对话能力（同对话三档迁移逻辑）。
+        legacy_total = raw.get("image_total_quota") is None
+        if legacy_total:
+            legacy_image_quota = self._coerce_int(raw.get("image_quota", raw.get("quota")), 0)
+            legacy_image_used = self._coerce_int(raw.get("image_used", raw.get("used")), 0)
+            legacy_image_unlimited = self._coerce_bool(
+                raw.get("image_unlimited", raw.get("unlimited")), False
+            )
+            image_total_quota = legacy_image_quota
+            image_total_used = legacy_image_used
+            image_total_unlimited = legacy_image_unlimited
+        else:
+            image_total_quota = self._coerce_int(raw.get("image_total_quota"), 0)
+            image_total_used = self._coerce_int(raw.get("image_total_used"), 0)
+            image_total_unlimited = self._coerce_bool(raw.get("image_total_unlimited"), False)
+
+        image_daily_quota = self._coerce_int(raw.get("image_daily_quota"), 0)
+        image_daily_used = self._coerce_int(raw.get("image_daily_used"), 0)
+        image_daily_unlimited = self._coerce_bool(
+            raw.get("image_daily_unlimited"), default="image_daily_quota" not in raw
+        )
+        image_daily_reset_at = self._clean(raw.get("image_daily_reset_at")) or _today_key()
+        image_monthly_quota = self._coerce_int(raw.get("image_monthly_quota"), 0)
+        image_monthly_used = self._coerce_int(raw.get("image_monthly_used"), 0)
+        image_monthly_unlimited = self._coerce_bool(
+            raw.get("image_monthly_unlimited"), default="image_monthly_quota" not in raw
+        )
+        image_monthly_reset_at = self._clean(raw.get("image_monthly_reset_at")) or _this_month_key()
+
+        chat_daily_quota = self._coerce_int(raw.get("chat_daily_quota"), 0)
+        chat_daily_used = self._coerce_int(raw.get("chat_daily_used"), 0)
+        chat_daily_unlimited = self._coerce_bool(
+            raw.get("chat_daily_unlimited"), default="chat_daily_quota" not in raw
+        )
+        chat_daily_reset_at = self._clean(raw.get("chat_daily_reset_at")) or _today_key()
+        chat_monthly_quota = self._coerce_int(raw.get("chat_monthly_quota"), 0)
+        chat_monthly_used = self._coerce_int(raw.get("chat_monthly_used"), 0)
+        chat_monthly_unlimited = self._coerce_bool(
+            raw.get("chat_monthly_unlimited"), default="chat_monthly_quota" not in raw
+        )
+        chat_monthly_reset_at = self._clean(raw.get("chat_monthly_reset_at")) or _this_month_key()
+        chat_total_quota = self._coerce_int(raw.get("chat_total_quota"), 0)
+        chat_total_used = self._coerce_int(raw.get("chat_total_used"), 0)
+        chat_total_unlimited = self._coerce_bool(
+            raw.get("chat_total_unlimited"), default="chat_total_quota" not in raw
+        )
+
+        # admin 永远六档全开，所有计数清零，挡掉脏数据。
+        if role == "admin":
+            image_daily_quota = image_daily_used = 0
+            image_monthly_quota = image_monthly_used = 0
+            image_total_quota = image_total_used = 0
+            chat_daily_quota = chat_daily_used = 0
+            chat_monthly_quota = chat_monthly_used = 0
+            chat_total_quota = chat_total_used = 0
+            image_daily_unlimited = True
+            image_monthly_unlimited = True
+            image_total_unlimited = True
+            chat_daily_unlimited = True
+            chat_monthly_unlimited = True
+            chat_total_unlimited = True
+
         return {
             "id": item_id,
             "name": name,
@@ -65,12 +175,44 @@ class AuthService:
             "enabled": bool(raw.get("enabled", True)),
             "created_at": created_at,
             "last_used_at": last_used_at,
-            # 一次性额度模型：quota=本次分配上限，used=累计已扣，
-            # unlimited=True 时不阻断也不计算 remaining。
-            "quota": self._coerce_int(raw.get("quota"), 0),
-            "used": self._coerce_int(raw.get("used"), 0),
-            "unlimited": bool(raw.get("unlimited", False)),
+            "image_daily_quota": image_daily_quota,
+            "image_daily_used": image_daily_used,
+            "image_daily_unlimited": image_daily_unlimited,
+            "image_daily_reset_at": image_daily_reset_at,
+            "image_monthly_quota": image_monthly_quota,
+            "image_monthly_used": image_monthly_used,
+            "image_monthly_unlimited": image_monthly_unlimited,
+            "image_monthly_reset_at": image_monthly_reset_at,
+            "image_total_quota": image_total_quota,
+            "image_total_used": image_total_used,
+            "image_total_unlimited": image_total_unlimited,
+            "chat_daily_quota": chat_daily_quota,
+            "chat_daily_used": chat_daily_used,
+            "chat_daily_unlimited": chat_daily_unlimited,
+            "chat_daily_reset_at": chat_daily_reset_at,
+            "chat_monthly_quota": chat_monthly_quota,
+            "chat_monthly_used": chat_monthly_used,
+            "chat_monthly_unlimited": chat_monthly_unlimited,
+            "chat_monthly_reset_at": chat_monthly_reset_at,
+            "chat_total_quota": chat_total_quota,
+            "chat_total_used": chat_total_used,
+            "chat_total_unlimited": chat_total_unlimited,
         }
+
+    @staticmethod
+    def _apply_period_reset(item: dict[str, object]) -> bool:
+        """跨过自然日/月就把对应 used 清零；返回是否改动了 item。
+        总额度不重置。同时覆盖画图与对话两侧的日 / 月。"""
+        changed = False
+        today_key = _today_key()
+        month_key = _this_month_key()
+        for kind in _PERIODIC_KINDS:
+            target_key = today_key if _is_daily_kind(kind) else month_key
+            if item.get(f"{kind}_reset_at") != target_key:
+                item[f"{kind}_used"] = 0
+                item[f"{kind}_reset_at"] = target_key
+                changed = True
+        return changed
 
     def _load(self) -> list[dict[str, object]]:
         try:
@@ -88,28 +230,46 @@ class AuthService:
         self._items = self._load()
 
     @staticmethod
-    def _public_item(item: dict[str, object]) -> dict[str, object]:
-        quota = AuthService._coerce_int(item.get("quota"), 0)
-        used = AuthService._coerce_int(item.get("used"), 0)
-        unlimited = bool(item.get("unlimited", False))
-        # 普通用户在前端读自己的剩余时直接拿这条，admin 同样会看到（admin 自己 unlimited=True、quota=0）。
-        remaining = None if unlimited else max(0, quota - used)
-        return {
+    def _remaining(quota: int, used: int, unlimited: bool) -> int | None:
+        if unlimited:
+            return None
+        return max(0, quota - used)
+
+    @classmethod
+    def _public_item(cls, item: dict[str, object]) -> dict[str, object]:
+        result: dict[str, object] = {
             "id": item.get("id"),
             "name": item.get("name"),
             "role": item.get("role"),
             "enabled": bool(item.get("enabled", True)),
             "created_at": item.get("created_at"),
             "last_used_at": item.get("last_used_at"),
-            "quota": quota,
-            "used": used,
-            "unlimited": unlimited,
-            "remaining": remaining,
         }
+        for kind in (*_IMAGE_KINDS, *_CHAT_KINDS):
+            quota = cls._coerce_int(item.get(f"{kind}_quota"), 0)
+            used = cls._coerce_int(item.get(f"{kind}_used"), 0)
+            unlimited = bool(item.get(f"{kind}_unlimited", False))
+            result[f"{kind}_quota"] = quota
+            result[f"{kind}_used"] = used
+            result[f"{kind}_unlimited"] = unlimited
+            result[f"{kind}_remaining"] = cls._remaining(quota, used, unlimited)
+        return result
 
     def list_keys(self, role: AuthRole | None = None) -> list[dict[str, object]]:
         with self._lock:
             self._reload_locked()
+            # 列表读取时也跑一次跨周期清零，避免前端展示陈旧的 daily_used。
+            dirty = False
+            for item in self._items:
+                if str(item.get("role") or "").strip().lower() == "admin":
+                    continue
+                if self._apply_period_reset(item):
+                    dirty = True
+            if dirty:
+                try:
+                    self._save()
+                except Exception:
+                    pass
             items = [item for item in self._items if role is None or item.get("role") == role]
             return [self._public_item(item) for item in items]
 
@@ -173,8 +333,18 @@ class AuthService:
         *,
         role: AuthRole,
         name: str = "",
-        quota: int = 0,
-        unlimited: bool = False,
+        image_daily_quota: int = 0,
+        image_daily_unlimited: bool = True,
+        image_monthly_quota: int = 0,
+        image_monthly_unlimited: bool = True,
+        image_total_quota: int = 0,
+        image_total_unlimited: bool = False,
+        chat_daily_quota: int = 0,
+        chat_daily_unlimited: bool = True,
+        chat_monthly_quota: int = 0,
+        chat_monthly_unlimited: bool = True,
+        chat_total_quota: int = 0,
+        chat_total_unlimited: bool = True,
     ) -> tuple[dict[str, object], str]:
         with self._lock:
             self._reload_locked()
@@ -186,6 +356,7 @@ class AuthService:
                     break
                 except ValueError:
                     continue
+            is_admin = role == "admin"
             item = {
                 "id": uuid.uuid4().hex[:12],
                 "name": normalized_name,
@@ -194,10 +365,28 @@ class AuthService:
                 "enabled": True,
                 "created_at": _now_iso(),
                 "last_used_at": None,
-                # admin 默认无限；user 默认按传入 quota，0 即不可用，需要再分配。
-                "quota": self._coerce_int(quota, 0),
-                "used": 0,
-                "unlimited": bool(unlimited) if role == "user" else True,
+                "image_daily_quota": 0 if is_admin else self._coerce_int(image_daily_quota, 0),
+                "image_daily_used": 0,
+                "image_daily_unlimited": True if is_admin else bool(image_daily_unlimited),
+                "image_daily_reset_at": _today_key(),
+                "image_monthly_quota": 0 if is_admin else self._coerce_int(image_monthly_quota, 0),
+                "image_monthly_used": 0,
+                "image_monthly_unlimited": True if is_admin else bool(image_monthly_unlimited),
+                "image_monthly_reset_at": _this_month_key(),
+                "image_total_quota": 0 if is_admin else self._coerce_int(image_total_quota, 0),
+                "image_total_used": 0,
+                "image_total_unlimited": True if is_admin else bool(image_total_unlimited),
+                "chat_daily_quota": 0 if is_admin else self._coerce_int(chat_daily_quota, 0),
+                "chat_daily_used": 0,
+                "chat_daily_unlimited": True if is_admin else bool(chat_daily_unlimited),
+                "chat_daily_reset_at": _today_key(),
+                "chat_monthly_quota": 0 if is_admin else self._coerce_int(chat_monthly_quota, 0),
+                "chat_monthly_used": 0,
+                "chat_monthly_unlimited": True if is_admin else bool(chat_monthly_unlimited),
+                "chat_monthly_reset_at": _this_month_key(),
+                "chat_total_quota": 0 if is_admin else self._coerce_int(chat_total_quota, 0),
+                "chat_total_used": 0,
+                "chat_total_unlimited": True if is_admin else bool(chat_total_unlimited),
             }
             self._items.append(item)
             self._save()
@@ -233,115 +422,190 @@ class AuthService:
                 if "key" in updates and updates.get("key") is not None:
                     next_item["key_hash"] = self._build_key_hash_locked(str(updates.get("key") or ""), exclude_id=normalized_id)
                 if next_role == "user":
-                    if "quota" in updates and updates.get("quota") is not None:
-                        next_item["quota"] = self._coerce_int(updates.get("quota"), 0)
-                    if "unlimited" in updates and updates.get("unlimited") is not None:
-                        next_item["unlimited"] = bool(updates.get("unlimited"))
-                    # 管理员手动重置已用计数：传 reset_used=True 就把 used 归零
-                    if updates.get("reset_used"):
-                        next_item["used"] = 0
+                    self._apply_quota_updates_locked(next_item, updates)
                 else:
-                    # admin 永远 unlimited，quota/used 字段保持稳定不被外部改坏
-                    next_item["unlimited"] = True
-                    next_item["quota"] = 0
-                    next_item["used"] = 0
+                    # admin 强制全档不限额，相关计数永远清零，挡掉外部恶意写入。
+                    for kind in (*_IMAGE_KINDS, *_CHAT_KINDS):
+                        next_item[f"{kind}_quota"] = 0
+                        next_item[f"{kind}_used"] = 0
+                        next_item[f"{kind}_unlimited"] = True
                 self._items[index] = next_item
                 self._save()
                 return self._public_item(next_item)
         return None
+
+    @classmethod
+    def _apply_quota_updates_locked(cls, target: dict[str, object], updates: dict[str, object]) -> None:
+        """把 update_key 传入的额度相关字段写到 target，保持 admin 路径不受影响。
+        每档 quota 与 unlimited 都按字面值透传；reset_<kind>_used 把对应 used 归零并刷新 reset_at。
+        旧 reset_used 等价于 reset_image_total_used，避免老 admin 客户端发布期间报错。
+        """
+        for kind in (*_IMAGE_KINDS, *_CHAT_KINDS):
+            quota_key = f"{kind}_quota"
+            unlimited_key = f"{kind}_unlimited"
+            if quota_key in updates and updates.get(quota_key) is not None:
+                target[quota_key] = cls._coerce_int(updates.get(quota_key), 0)
+            if unlimited_key in updates and updates.get(unlimited_key) is not None:
+                target[unlimited_key] = bool(updates.get(unlimited_key))
+            reset_key = f"reset_{kind}_used"
+            if updates.get(reset_key):
+                target[f"{kind}_used"] = 0
+                if _is_daily_kind(kind):
+                    target[f"{kind}_reset_at"] = _today_key()
+                elif _is_monthly_kind(kind):
+                    target[f"{kind}_reset_at"] = _this_month_key()
+        if updates.get("reset_used"):
+            # 老前端协议；映射到画图总额度计数。
+            target["image_total_used"] = 0
 
     def get_by_id(self, key_id: str) -> dict[str, object] | None:
         normalized_id = self._clean(key_id)
         if not normalized_id:
             return None
         with self._lock:
-            for item in self._items:
-                if item.get("id") == normalized_id:
-                    return self._public_item(item)
+            for index, item in enumerate(self._items):
+                if item.get("id") != normalized_id:
+                    continue
+                # 读取单条时也跑一次跨周期清零，让前端拉自己 identity 时看到的是当下的余额。
+                next_item = dict(item)
+                if self._apply_period_reset(next_item):
+                    self._items[index] = next_item
+                    try:
+                        self._save()
+                    except Exception:
+                        pass
+                return self._public_item(next_item)
         return None
 
-    def consume_quota(self, key_id: str, amount: int) -> dict[str, object]:
-        """扣减用户密钥额度。返回 {ok, remaining, unlimited, reason}。
-        admin / unlimited 直接放行；普通用户额度不足时 ok=False 且不写入。"""
-        normalized_id = self._clean(key_id)
+    def _consume_kinds_locked(
+        self,
+        key_id: str,
+        amount: int,
+        kinds: tuple[QuotaKind, ...],
+        block_label_map: dict[str, str],
+    ) -> dict[str, object]:
+        """在已持锁场景下扣减一组 kinds（任一档不足都拒绝）。
+        管理员直接放行；返回结构对齐画图 / 对话两侧的语义。"""
         delta = max(0, int(amount or 0))
-        if not normalized_id or delta == 0:
+        if not key_id or delta == 0:
             return {"ok": True, "remaining": None, "unlimited": True, "reason": ""}
-        with self._lock:
-            for index, item in enumerate(self._items):
-                if item.get("id") != normalized_id:
+        for index, item in enumerate(self._items):
+            if item.get("id") != key_id:
+                continue
+            role = str(item.get("role") or "").strip().lower()
+            if role == "admin":
+                return {"ok": True, "remaining": None, "unlimited": True, "reason": ""}
+            next_item = dict(item)
+            self._apply_period_reset(next_item)
+            blocked: list[str] = []
+            snapshots: list[tuple[QuotaKind, int, int, bool]] = []
+            for kind in kinds:
+                quota = self._coerce_int(next_item.get(f"{kind}_quota"), 0)
+                used = self._coerce_int(next_item.get(f"{kind}_used"), 0)
+                unlimited = bool(next_item.get(f"{kind}_unlimited", False))
+                snapshots.append((kind, quota, used, unlimited))
+                # unlimited 只解除 quota 上限校验；used 仍照常累加，
+                # 让管理员后续切换到限额时不会丢失"日 ⊂ 月 ⊂ 总"的历史使用数据。
+                if unlimited:
                     continue
-                role = str(item.get("role") or "").strip().lower()
-                if role == "admin" or bool(item.get("unlimited", False)):
-                    return {"ok": True, "remaining": None, "unlimited": True, "reason": ""}
-                quota = self._coerce_int(item.get("quota"), 0)
-                used = self._coerce_int(item.get("used"), 0)
-                remaining = max(0, quota - used)
-                if remaining < delta:
-                    return {
-                        "ok": False,
-                        "remaining": remaining,
-                        "unlimited": False,
-                        "reason": "额度不足，请联系管理员追加额度后再试",
-                    }
-                next_item = dict(item)
-                next_item["used"] = used + delta
-                self._items[index] = next_item
-                try:
-                    self._save()
-                except Exception:
-                    # 持久化失败时回滚内存，避免数字飘
-                    self._items[index] = item
-                    raise
+                if max(0, quota - used) < delta:
+                    blocked.append(kind)
+            if blocked:
                 return {
-                    "ok": True,
-                    "remaining": max(0, quota - next_item["used"]),
+                    "ok": False,
+                    "blocked": blocked,
                     "unlimited": False,
-                    "reason": "",
+                    "reason": _block_reason(blocked, block_label_map),
+                    # 老协议字段：画图侧入口处会读 remaining 决定 toast 文案。
+                    "remaining": _remaining_snapshot(next_item, kinds),
                 }
+            # 通过校验：所有档位（含 unlimited）都把本次 delta 累加进 used，
+            # 这样日 / 月 / 总的 used 才能保持"包含关系"，不会因为某档不限就漏记。
+            for kind, quota, used, unlimited in snapshots:
+                next_item[f"{kind}_used"] = used + delta
+            self._items[index] = next_item
+            try:
+                self._save()
+            except Exception:
+                self._items[index] = item
+                raise
+            return {
+                "ok": True,
+                "unlimited": False,
+                "reason": "",
+                "remaining": _remaining_snapshot(next_item, kinds),
+            }
         return {"ok": False, "remaining": 0, "unlimited": False, "reason": "密钥不存在"}
 
-    def refund_quota(self, key_id: str, amount: int) -> dict[str, object]:
-        """退还用户密钥额度。语义跟 [consume_quota] 对称：
-        admin / unlimited 直接 noop；其它用户 used 减去 amount 但不会跌破 0。
-
-        用途：图片生成上游真实失败（content_policy / 5xx / 上游超时）时，
-        把入口预扣的额度退回去，让用户体感是"真生成了才扣"。
-        持久化失败回滚内存，跟 consume_quota 同样的失败处理。
-        """
-        normalized_id = self._clean(key_id)
+    def _refund_kinds_locked(
+        self,
+        key_id: str,
+        amount: int,
+        kinds: tuple[QuotaKind, ...],
+    ) -> dict[str, object]:
         delta = max(0, int(amount or 0))
-        if not normalized_id or delta == 0:
+        if not key_id or delta == 0:
             return {"ok": True, "remaining": None, "unlimited": True, "reason": ""}
-        with self._lock:
-            for index, item in enumerate(self._items):
-                if item.get("id") != normalized_id:
-                    continue
-                role = str(item.get("role") or "").strip().lower()
-                if role == "admin" or bool(item.get("unlimited", False)):
-                    return {"ok": True, "remaining": None, "unlimited": True, "reason": ""}
-                quota = self._coerce_int(item.get("quota"), 0)
-                used = self._coerce_int(item.get("used"), 0)
+        for index, item in enumerate(self._items):
+            if item.get("id") != key_id:
+                continue
+            role = str(item.get("role") or "").strip().lower()
+            if role == "admin":
+                return {"ok": True, "remaining": None, "unlimited": True, "reason": ""}
+            next_item = dict(item)
+            self._apply_period_reset(next_item)
+            changed = False
+            for kind in kinds:
+                # 与 _consume_kinds_locked 对称：unlimited 档当时也累加了 used，
+                # 退款也得对称还回来，否则 used 计数会单调上涨。
+                used = self._coerce_int(next_item.get(f"{kind}_used"), 0)
                 if used <= 0:
-                    # 没扣过就别退——避免某些 race 让 used 变负数
-                    return {"ok": True, "remaining": max(0, quota - used), "unlimited": False, "reason": ""}
-                next_item = dict(item)
-                # 不会跌破 0：上游返多次失败回调时退超量也只到 0 为止
-                next_item["used"] = max(0, used - delta)
-                self._items[index] = next_item
-                try:
-                    self._save()
-                except Exception:
-                    # 持久化失败时回滚内存，避免数字飘
-                    self._items[index] = item
-                    raise
-                return {
-                    "ok": True,
-                    "remaining": max(0, quota - next_item["used"]),
-                    "unlimited": False,
-                    "reason": "",
-                }
+                    continue
+                next_item[f"{kind}_used"] = max(0, used - delta)
+                changed = True
+            if not changed:
+                return {"ok": True, "unlimited": False, "reason": "", "remaining": _remaining_snapshot(next_item, kinds)}
+            self._items[index] = next_item
+            try:
+                self._save()
+            except Exception:
+                self._items[index] = item
+                raise
+            return {
+                "ok": True,
+                "unlimited": False,
+                "reason": "",
+                "remaining": _remaining_snapshot(next_item, kinds),
+            }
         return {"ok": False, "remaining": 0, "unlimited": False, "reason": "密钥不存在"}
+
+    def consume_image_quota(self, key_id: str, amount: int) -> dict[str, object]:
+        """扣减用户密钥的画图额度（日 / 月 / 总同时扣）。
+        admin 全放行；任一档剩余不够直接拒绝（API 层据此返 402）。"""
+        normalized_id = self._clean(key_id)
+        with self._lock:
+            return self._consume_kinds_locked(normalized_id, amount, _IMAGE_KINDS, _IMAGE_KIND_LABEL)
+
+    def refund_image_quota(self, key_id: str, amount: int) -> dict[str, object]:
+        """画图上游真失败时对画图三档同时退款。"""
+        normalized_id = self._clean(key_id)
+        with self._lock:
+            return self._refund_kinds_locked(normalized_id, amount, _IMAGE_KINDS)
+
+    # 兼容旧调用名（image_task_service / 其他模块直接 import 用过的）。
+    consume_quota = consume_image_quota
+    refund_quota = refund_image_quota
+
+    def consume_chat_quota(self, key_id: str, amount: int = 1) -> dict[str, object]:
+        """扣减用户密钥的对话额度（日 / 月 / 总同时扣）。"""
+        normalized_id = self._clean(key_id)
+        with self._lock:
+            return self._consume_kinds_locked(normalized_id, amount, _CHAT_KINDS, _CHAT_KIND_LABEL)
+
+    def refund_chat_quota(self, key_id: str, amount: int = 1) -> dict[str, object]:
+        normalized_id = self._clean(key_id)
+        with self._lock:
+            return self._refund_kinds_locked(normalized_id, amount, _CHAT_KINDS)
 
     def delete_key(self, key_id: str, *, role: AuthRole | None = None) -> bool:
         normalized_id = self._clean(key_id)
@@ -386,6 +650,35 @@ class AuthService:
                         pass
                 return self._public_item(next_item)
         return None
+
+
+_IMAGE_KIND_LABEL = {
+    "image_daily": "今日画图额度",
+    "image_monthly": "本月画图额度",
+    "image_total": "画图总额度",
+}
+
+_CHAT_KIND_LABEL = {
+    "chat_daily": "今日对话额度",
+    "chat_monthly": "本月对话额度",
+    "chat_total": "对话总额度",
+}
+
+
+def _block_reason(blocked: list[str], label_map: dict[str, str]) -> str:
+    labels = [label_map.get(kind, kind) for kind in blocked]
+    return "、".join(labels) + "已用完，请联系管理员追加额度后再试"
+
+
+def _remaining_snapshot(item: dict[str, object], kinds: tuple[QuotaKind, ...]) -> dict[str, int | None]:
+    """指定 kinds 当前剩余的快照，给前端实时展示用。"""
+    snapshot: dict[str, int | None] = {}
+    for kind in kinds:
+        quota = AuthService._coerce_int(item.get(f"{kind}_quota"), 0)
+        used = AuthService._coerce_int(item.get(f"{kind}_used"), 0)
+        unlimited = bool(item.get(f"{kind}_unlimited", False))
+        snapshot[kind] = None if unlimited else max(0, quota - used)
+    return snapshot
 
 
 auth_service = AuthService(config.get_storage_backend())
