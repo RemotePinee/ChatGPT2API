@@ -43,6 +43,14 @@ class GalleryItemModel(Base):
     data = Column(Text, nullable=False)
 
 
+class ChatConversationModel(Base):
+    __tablename__ = "chat_conversations"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    conversation_id = Column(String(64), unique=True, nullable=False, index=True)
+    data = Column(Text, nullable=False)
+
+
 class DatabaseStorageBackend(StorageBackend):
     """数据库存储后端（支持 SQLite、PostgreSQL、MySQL 等）"""
 
@@ -92,7 +100,13 @@ class DatabaseStorageBackend(StorageBackend):
         """保存画廊条目到数据库"""
         self._save_rows(GalleryItemModel, items, "id", "item_id")
 
-    def _load_rows(self, model: type[AccountModel] | type[AuthKeyModel]) -> list[dict[str, Any]]:
+    def load_chat_conversations(self) -> list[dict[str, Any]]:
+        return self._load_rows(ChatConversationModel)
+
+    def save_chat_conversations(self, items: list[dict[str, Any]]) -> None:
+        self._save_rows(ChatConversationModel, items, "id", "conversation_id")
+
+    def _load_rows(self, model: type[AccountModel] | type[AuthKeyModel] | type[GalleryItemModel] | type[ChatConversationModel]) -> list[dict[str, Any]]:
         session = self.Session()
         try:
             items = []
@@ -109,7 +123,7 @@ class DatabaseStorageBackend(StorageBackend):
 
     def _save_rows(
         self,
-        model: type[AccountModel] | type[AuthKeyModel],
+        model: type[AccountModel] | type[AuthKeyModel] | type[GalleryItemModel] | type[ChatConversationModel],
         items: list[dict[str, Any]],
         source_key: str,
         target_key: str | None = None,
@@ -146,6 +160,7 @@ class DatabaseStorageBackend(StorageBackend):
                 count = session.query(AccountModel).count()
                 auth_key_count = session.query(AuthKeyModel).count()
                 gallery_count = session.query(GalleryItemModel).count()
+                chat_conversation_count = session.query(ChatConversationModel).count()
                 return {
                     "status": "healthy",
                     "backend": "database",
@@ -153,6 +168,7 @@ class DatabaseStorageBackend(StorageBackend):
                     "account_count": count,
                     "auth_key_count": auth_key_count,
                     "gallery_count": gallery_count,
+                    "chat_conversation_count": chat_conversation_count,
                 }
             finally:
                 session.close()

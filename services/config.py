@@ -24,6 +24,7 @@ DEFAULT_BACKUP_INCLUDE = {
     "image_tasks": True,
     "accounts_snapshot": True,
     "auth_keys_snapshot": True,
+    "chat_conversations_snapshot": True,
     "images": False,
 }
 

@@ -8,8 +8,10 @@ import { usePathname, useRouter } from "next/navigation";
 import { clearAuthSessionCache, getValidatedAuthSession } from "@/lib/auth-session";
 import { cn } from "@/lib/utils";
 import { clearStoredAuthSession, type StoredAuthSession } from "@/store/auth";
+import { QuotaPopover } from "@/components/quota-popover";
 
 const adminNavItems = [
+  { href: "/chat", label: "对话" },
   { href: "/image", label: "画图" },
   { href: "/gallery", label: "画廊" },
   { href: "/accounts", label: "号池管理" },
@@ -17,9 +19,11 @@ const adminNavItems = [
   { href: "/image-manager", label: "图片管理" },
   { href: "/logs", label: "日志管理" },
   { href: "/settings", label: "设置" },
+  { href: "/keys", label: "用户密钥" },
 ];
 
 const userNavItems = [
+  { href: "/chat", label: "对话" },
   { href: "/image", label: "画图" },
   { href: "/works", label: "我的作品" },
   { href: "/gallery", label: "画廊" },
@@ -150,7 +154,7 @@ export function TopNav() {
     <header className="fixed top-0 right-0 left-0 z-40 bg-background/25 backdrop-blur-[28px] backdrop-saturate-150">
       <div className="mx-auto flex h-12 max-w-[1440px] items-center gap-3 px-4 sm:h-14 sm:gap-4 sm:px-6 lg:px-8">
         <div className="flex shrink-0 items-center gap-2 sm:gap-3">
-          <Link href="/image" className="group flex shrink-0 -translate-y-[1px] items-center py-1">
+          <Link href="/chat" className="group flex shrink-0 -translate-y-[1px] items-center py-1">
             <span className="text-[20px] font-bold leading-none tracking-[-0.025em] text-foreground">
               Chat
             </span>
@@ -247,6 +251,7 @@ export function TopNav() {
                 <span className="hidden font-bold text-muted-foreground lg:inline">{roleLabel}</span>
               </>
             ) : null}
+            <QuotaPopover />
           </span>
           <button
             type="button"

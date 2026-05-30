@@ -37,6 +37,14 @@ class StorageBackend(ABC):
         """保存所有画廊条目"""
         pass
 
+    def load_chat_conversations(self) -> list[dict[str, Any]]:
+        """加载所有聊天会话；老后端没实现时返回空，避免启动失败。"""
+        return []
+
+    def save_chat_conversations(self, items: list[dict[str, Any]]) -> None:
+        """保存所有聊天会话；默认 noop，子类按需覆盖。"""
+        return None
+
     @abstractmethod
     def health_check(self) -> dict[str, Any]:
         """健康检查，返回存储后端状态"""

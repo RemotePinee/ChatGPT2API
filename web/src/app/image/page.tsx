@@ -21,11 +21,9 @@ import {
   createImageEditTask,
   createImageGenerationTask,
   cancelImageTasks,
-  fetchAccounts,
   fetchImageTasks,
   fetchMyIdentity,
   publishGalleryItem,
-  type Account,
   type ImageTask,
 } from "@/lib/api";
 import { useAuthGuard } from "@/lib/use-auth-guard";
@@ -78,9 +76,9 @@ function formatConversationTime(value: string) {
   }).format(date);
 }
 
-function formatAvailableQuota(accounts: Account[]) {
-  const availableAccounts = accounts.filter((account) => account.status !== "禁用");
-  return String(availableAccounts.reduce((sum, account) => sum + Math.max(0, account.quota), 0));
+function formatAvailableQuota() {
+  // 已废弃：admin 直接显示 ∞，不再走号池累加，留壳避免外部潜在调用炸掉。
+  return "∞";
 }
 
 function createId() {
@@ -614,23 +612,39 @@ function ImagePageContent({ isAdmin }: { isAdmin: boolean }) {
 
   const loadQuota = useCallback(async () => {
     if (isAdmin) {
-      // 管理员：显示账号池里所有正常账号的剩余额度合计。
-      try {
-        const data = await fetchAccounts();
-        setAvailableQuota(formatAvailableQuota(data.items));
-      } catch {
-        setAvailableQuota((prev) => (prev === "加载中..." ? "--" : prev));
-      }
+      // 管理员密钥层面是全档不限额，画图能力的真实瓶颈在号池而非密钥额度。
+      // 顶部展示的是"我自己这把密钥的画图额度"，所以直接显示 ∞——
+      // 号池可用量在「号池管理」页有更准确的视图。
+      setAvailableQuota("∞");
       return;
     }
-    // 普通用户：显示自己密钥的剩余额度（unlimited 时显示 ∞）。
+    // 普通用户：显示自己密钥的剩余画图额度。三档（日/月/总）任一不限即视作 ∞，
+    // 否则取最小剩余作为可用画图张数——这样按钮禁用与上游 402 分支保持一致。
     try {
       const { identity } = await fetchMyIdentity();
-      if (identity.unlimited) {
+      const candidates: number[] = [];
+      if (!identity.image_daily_unlimited) {
+        candidates.push(
+          identity.image_daily_remaining ??
+            Math.max(0, identity.image_daily_quota - identity.image_daily_used),
+        );
+      }
+      if (!identity.image_monthly_unlimited) {
+        candidates.push(
+          identity.image_monthly_remaining ??
+            Math.max(0, identity.image_monthly_quota - identity.image_monthly_used),
+        );
+      }
+      if (!identity.image_total_unlimited) {
+        candidates.push(
+          identity.image_total_remaining ??
+            Math.max(0, identity.image_total_quota - identity.image_total_used),
+        );
+      }
+      if (candidates.length === 0) {
         setAvailableQuota("∞");
       } else {
-        const remaining = identity.remaining ?? Math.max(0, identity.quota - identity.used);
-        setAvailableQuota(String(remaining));
+        setAvailableQuota(String(Math.min(...candidates)));
       }
     } catch {
       setAvailableQuota((prev) => (prev === "加载中..." ? "--" : prev));

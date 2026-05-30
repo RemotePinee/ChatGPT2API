@@ -1,6 +1,8 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
+@plugin "@tailwindcss/typography";
+
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
@@ -411,3 +413,102 @@
     animation: none;
   }
 }
+
+/* 聊天气泡内的 markdown：在 .prose 基础上压紧间距、统一字号、复用主题色。
+   规则只在 .chat-md 作用域下生效，避免污染 settings/docs 等其它 prose 区域。*/
+.chat-md {
+  --tw-prose-body: var(--foreground);
+  --tw-prose-headings: var(--foreground);
+  --tw-prose-bold: var(--foreground);
+  --tw-prose-links: var(--primary);
+  --tw-prose-code: var(--foreground);
+  --tw-prose-pre-code: oklch(0.96 0 0);
+  --tw-prose-pre-bg: oklch(0.18 0.018 260);
+  --tw-prose-quotes: var(--muted-foreground);
+  --tw-prose-quote-borders: var(--border);
+  --tw-prose-bullets: var(--muted-foreground);
+  --tw-prose-counters: var(--muted-foreground);
+  --tw-prose-hr: var(--border);
+  --tw-prose-th-borders: var(--border);
+  --tw-prose-td-borders: var(--border);
+}
+.chat-md > :first-child { margin-top: 0; }
+.chat-md > :last-child { margin-bottom: 0; }
+.chat-md p,
+.chat-md ul,
+.chat-md ol,
+.chat-md blockquote,
+.chat-md pre,
+.chat-md table { margin-top: 0.5em; margin-bottom: 0.5em; }
+.chat-md h1,
+.chat-md h2,
+.chat-md h3,
+.chat-md h4 { margin-top: 0.85em; margin-bottom: 0.4em; line-height: 1.3; }
+.chat-md h1 { font-size: 1.25em; }
+.chat-md h2 { font-size: 1.15em; }
+.chat-md h3 { font-size: 1.05em; }
+.chat-md h4 { font-size: 1em; }
+.chat-md ul,
+.chat-md ol { padding-left: 1.4em; }
+.chat-md li { margin-top: 0.15em; margin-bottom: 0.15em; }
+.chat-md li > p { margin-top: 0.2em; margin-bottom: 0.2em; }
+.chat-md :not(pre) > code {
+  padding: 0.1em 0.35em;
+  border-radius: 0.35em;
+  background: color-mix(in oklch, var(--muted) 75%, transparent);
+  font-size: 0.88em;
+  font-weight: 500;
+}
+.chat-md :not(pre) > code::before,
+.chat-md :not(pre) > code::after { content: none; }
+.chat-md pre {
+  padding: 0.85em 1em;
+  border-radius: 0.6em;
+  font-size: 0.85em;
+  line-height: 1.55;
+  overflow-x: auto;
+}
+.chat-md pre code {
+  background: transparent;
+  padding: 0;
+  font-size: inherit;
+  font-weight: 400;
+}
+.chat-md table { font-size: 0.92em; }
+.chat-md blockquote {
+  font-style: normal;
+  padding-left: 0.9em;
+  border-left-width: 3px;
+}
+.chat-md blockquote p::before,
+.chat-md blockquote p::after { content: none; }
+
+/* highlight.js github-dark 子集：只覆盖最常见 token，体积比整包小。
+   .hljs 容器自身用 prose 的 pre-bg/pre-code 即可，不再单独着色。 */
+.chat-md .hljs-comment,
+.chat-md .hljs-quote { color: oklch(0.62 0.014 260); font-style: italic; }
+.chat-md .hljs-keyword,
+.chat-md .hljs-selector-tag,
+.chat-md .hljs-literal,
+.chat-md .hljs-section,
+.chat-md .hljs-link { color: oklch(0.78 0.16 320); }
+.chat-md .hljs-string,
+.chat-md .hljs-attr,
+.chat-md .hljs-template-tag,
+.chat-md .hljs-template-variable { color: oklch(0.82 0.15 145); }
+.chat-md .hljs-number,
+.chat-md .hljs-symbol,
+.chat-md .hljs-bullet,
+.chat-md .hljs-meta { color: oklch(0.82 0.14 75); }
+.chat-md .hljs-title,
+.chat-md .hljs-name,
+.chat-md .hljs-type,
+.chat-md .hljs-built_in,
+.chat-md .hljs-class .hljs-title { color: oklch(0.78 0.13 220); }
+.chat-md .hljs-variable,
+.chat-md .hljs-regexp,
+.chat-md .hljs-attribute { color: oklch(0.82 0.14 50); }
+.chat-md .hljs-deletion { color: oklch(0.7 0.2 25); }
+.chat-md .hljs-addition { color: oklch(0.78 0.16 145); }
+.chat-md .hljs-emphasis { font-style: italic; }
+.chat-md .hljs-strong { font-weight: 600; }

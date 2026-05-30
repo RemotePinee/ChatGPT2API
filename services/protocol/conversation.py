@@ -645,6 +645,70 @@ def stream_image_chunks(outputs: Iterable[ImageOutput]) -> Iterator[dict[str, An
         yield output.to_chunk()
 
 
+def stream_chat_events(
+    request: ConversationRequest,
+    *,
+    preferred_token: str = "",
+    excluded_tokens: set[str] | None = None,
+) -> Iterator[dict[str, Any]]:
+    """/api/chat/stream 专用通道：history_and_training_disabled=False，
+    暴露 conversation_id 供调用方做异步 DELETE。失效 token 单次轮换。
+    preferred_token 用于续聊场景'粘住'原账号；excluded_tokens 用于'手动换号'
+    排除旧号；上游每轮都开新 cid，靠完整历史维持上下文，避免和 done 后的 DELETE
+    自相矛盾。"""
+    attempted: set[str] = set(excluded_tokens or ())
+    token = ""
+    if preferred_token and preferred_token not in attempted:
+        account = account_service.get_account(preferred_token)
+        if account and str(account.get("status") or "") not in {"禁用", "异常"}:
+            token = preferred_token
+    if not token:
+        token = account_service.get_text_access_token(attempted)
+    emitted = False
+    while True:
+        if token and token in attempted:
+            raise RuntimeError("no available text account")
+        if token:
+            attempted.add(token)
+        backend = OpenAIBackendAPI(access_token=token)
+        normalized = normalize_messages(request.messages or ([{"role": "user", "content": request.prompt}] if request.prompt else []))
+        history_text = assistant_history_text(normalized)
+        history_messages = assistant_history_messages(normalized)
+        try:
+            payloads = backend.stream_conversation(
+                messages=normalized,
+                model=request.model,
+                prompt=request.prompt,
+                history_and_training_disabled=False,
+            )
+            for event in iter_conversation_payloads(payloads, history_text, history_messages):
+                emitted = True
+                event["account_token"] = token
+                yield event
+            account_service.mark_text_used(token)
+            return
+        except Exception as exc:
+            error_message = str(exc)
+            if token and not emitted and is_token_invalid_error(error_message):
+                account_service.remove_invalid_token(token, "chat_stream")
+                token = account_service.get_text_access_token(attempted)
+                if token:
+                    continue
+            raise
+
+
+def delete_conversation_safely(token: str, conversation_id: str) -> None:
+    """异步 DELETE 用：失败吞掉。"""
+    if not token or not conversation_id:
+        return
+    try:
+        OpenAIBackendAPI(access_token=token).delete_conversation(conversation_id)
+    except Exception:
+        pass
+
+
+
+
 def collect_image_outputs(outputs: Iterable[ImageOutput]) -> dict[str, Any]:
     created = None
     data: list[dict[str, Any]] = []

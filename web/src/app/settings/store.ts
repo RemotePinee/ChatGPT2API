@@ -58,6 +58,7 @@ function normalizeConfig(config: SettingsConfig): SettingsConfig {
         image_tasks: true,
         accounts_snapshot: true,
         auth_keys_snapshot: true,
+        chat_conversations_snapshot: true,
         images: false,
       },
     };
@@ -104,6 +105,7 @@ function normalizeConfig(config: SettingsConfig): SettingsConfig {
         image_tasks: Boolean(backup.include?.image_tasks ?? true),
         accounts_snapshot: Boolean(backup.include?.accounts_snapshot ?? true),
         auth_keys_snapshot: Boolean(backup.include?.auth_keys_snapshot ?? true),
+        chat_conversations_snapshot: Boolean(backup.include?.chat_conversations_snapshot ?? true),
         images: Boolean(backup.include?.images ?? false),
       },
     },
@@ -227,6 +229,7 @@ type SettingsStore = {
   setRegisterTargetQuota: (value: string) => void;
   setRegisterTargetAvailable: (value: string) => void;
   setRegisterCheckInterval: (value: string) => void;
+  setRegisterFixedPassword: (value: string) => void;
   setRegisterMailField: (key: "request_timeout" | "wait_timeout" | "wait_interval", value: string) => void;
   addRegisterProvider: () => void;
   updateRegisterProvider: (index: number, updates: Record<string, unknown>) => void;
@@ -666,6 +669,10 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
     set((state) => state.registerConfig ? { registerConfig: { ...state.registerConfig, check_interval: Number(value) || 0 } } : {});
   },
 
+  setRegisterFixedPassword: (value) => {
+    set((state) => state.registerConfig ? { registerConfig: { ...state.registerConfig, fixed_password: value } } : {});
+  },
+
   setRegisterMailField: (key, value) => {
     set((state) => state.registerConfig ? {
       registerConfig: {
@@ -725,6 +732,7 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
         target_quota: Math.max(1, Number(registerConfig.target_quota) || 1),
         target_available: Math.max(1, Number(registerConfig.target_available) || 1),
         check_interval: Math.max(1, Number(registerConfig.check_interval) || 5),
+        fixed_password: registerConfig.fixed_password,
       });
       set({ registerConfig: data.register });
       toast.success("注册配置已保存");
@@ -750,6 +758,7 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
           target_quota: Math.max(1, Number(registerConfig.target_quota) || 1),
           target_available: Math.max(1, Number(registerConfig.target_available) || 1),
           check_interval: Math.max(1, Number(registerConfig.check_interval) || 5),
+          fixed_password: registerConfig.fixed_password,
         });
       }
       const data = registerConfig.enabled ? await stopRegister() : await startRegister();

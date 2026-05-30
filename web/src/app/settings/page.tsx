@@ -22,7 +22,6 @@ import {
   SecuritySection,
 } from "./components/settings-sections";
 import { Sub2APIConnections } from "./components/sub2api-connections";
-import { UserKeysCard } from "./components/user-keys-card";
 import { useSettingsStore } from "./store";
 
 /**
@@ -31,7 +30,7 @@ import { useSettingsStore } from "./store";
  *   - 右侧 TOC 也用这条 list
  */
 const SECTIONS: Array<TOCItem & { description: string }> = [
-  { id: "account", label: "账号与身份", description: "账号刷新策略、自动维护开关，以及分发给团队的 user 密钥。" },
+  { id: "account", label: "账号与身份", description: "账号刷新策略与自动维护开关。用户密钥分发请前往「用户密钥」页。" },
   { id: "network", label: "网络", description: "全局代理：同时影响生图请求和 OpenAI 上游转发。" },
   { id: "images", label: "图片", description: "访问地址、生成超时、并发上限、过期清理及保护策略。" },
   { id: "security", label: "内容安全", description: "敏感词与全局附加指令——把审查放在请求落到生图账号之前。" },
@@ -87,12 +86,7 @@ function SettingsDataController() {
 function SectionBody({ id }: { id: string }) {
   switch (id) {
     case "account":
-      return (
-        <div className="space-y-6">
-          <AccountSection />
-          <UserKeysCard />
-        </div>
-      );
+      return <AccountSection />;
     case "network":
       return <NetworkSection />;
     case "images":

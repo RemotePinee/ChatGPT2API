@@ -72,6 +72,7 @@ const includeLabels: Array<{ key: keyof BackupInclude; label: string }> = [
   { key: "image_tasks", label: "图片任务记录" },
   { key: "accounts_snapshot", label: "账号快照" },
   { key: "auth_keys_snapshot", label: "用户密钥快照" },
+  { key: "chat_conversations_snapshot", label: "聊天会话快照" },
   { key: "images", label: "图片文件目录" },
 ];
 

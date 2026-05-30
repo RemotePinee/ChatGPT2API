@@ -643,6 +643,12 @@ class BackupService:
                     "snapshots/auth_keys.json",
                     _json_bytes(config.get_storage_backend().load_auth_keys()),
                 )
+            if include.get("chat_conversations_snapshot"):
+                self._add_bytes_to_archive(
+                    archive,
+                    "snapshots/chat_conversations.json",
+                    _json_bytes(config.get_storage_backend().load_chat_conversations()),
+                )
             if include.get("images"):
                 self._add_file_to_archive(archive, TAGS_FILE, "data/image_tags.json")
                 self._add_directory_to_archive(archive, config.images_dir, "data/images")

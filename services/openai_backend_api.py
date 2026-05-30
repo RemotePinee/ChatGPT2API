@@ -359,8 +359,12 @@ class OpenAIBackendAPI:
             })
         return conversation_messages
 
-    def _conversation_payload(self, messages: list[Dict[str, Any]], model: str, timezone: str) -> Dict[str, Any]:
-        """把标准 messages 构造成 web 对话请求体。"""
+    def _conversation_payload(self, messages: list[Dict[str, Any]], model: str, timezone: str,
+                              history_and_training_disabled: bool = True) -> Dict[str, Any]:
+        """把标准 messages 构造成 web 对话请求体。
+
+        history_and_training_disabled=True 走临时聊天链路（默认，给 /v1/* 兼容接口用）；
+        =False 才会拿到带 conversation_id 的常规会话，也是触发 image_gen 工具的前提。"""
         return {
             "action": "next",
             "messages": self._api_messages_to_conversation_messages(messages),
@@ -372,7 +376,7 @@ class OpenAIBackendAPI:
             "force_paragen_model_slug": "",
             "force_rate_limit": False,
             "force_use_sse": True,
-            "history_and_training_disabled": True,
+            "history_and_training_disabled": history_and_training_disabled,
             "reset_rate_limits": False,
             "suggestions": [],
             "supported_encodings": [],
@@ -792,6 +796,7 @@ class OpenAIBackendAPI:
             prompt: str = "",
             images: Optional[list[str]] = None,
             system_hints: Optional[list[str]] = None,
+            history_and_training_disabled: bool = True,
     ) -> Iterator[str]:
         system_hints = system_hints or []
         if "picture_v2" in system_hints:
@@ -802,7 +807,7 @@ class OpenAIBackendAPI:
         self._bootstrap()
         requirements = self._get_chat_requirements()
         path, timezone = self._chat_target()
-        payload = self._conversation_payload(normalized, model, timezone)
+        payload = self._conversation_payload(normalized, model, timezone, history_and_training_disabled)
         response = self.session.post(
             self.base_url + path,
             headers=self._conversation_headers(path, requirements),
@@ -815,6 +820,24 @@ class OpenAIBackendAPI:
             yield from iter_sse_payloads(response)
         finally:
             response.close()
+
+    def delete_conversation(self, conversation_id: str) -> None:
+        """把指定 conversation 标记为不可见，对齐官网"删除会话"行为。
+        仅在 access_token 模式下可用；任何失败都吞掉，调用方按"尽力而为"语义处理。"""
+        cid = str(conversation_id or "").strip()
+        if not cid or not self.access_token:
+            return
+        path = f"/backend-api/conversation/{cid}"
+        try:
+            response = self.session.patch(
+                self.base_url + path,
+                headers=self._headers(path, {"Content-Type": "application/json"}),
+                json={"is_visible": False},
+                timeout=30,
+            )
+            response.close()
+        except Exception:
+            pass
 
     def _stream_picture_conversation(
             self,

@@ -10,13 +10,21 @@ from services.storage.base import StorageBackend
 class JSONStorageBackend(StorageBackend):
     """本地 JSON 文件存储后端"""
 
-    def __init__(self, file_path: Path, auth_keys_path: Path | None = None, gallery_path: Path | None = None):
+    def __init__(
+        self,
+        file_path: Path,
+        auth_keys_path: Path | None = None,
+        gallery_path: Path | None = None,
+        chat_conversations_path: Path | None = None,
+    ):
         self.file_path = file_path
         self.auth_keys_path = auth_keys_path or file_path.with_name("auth_keys.json")
         self.gallery_path = gallery_path or file_path.with_name("gallery.json")
+        self.chat_conversations_path = chat_conversations_path or file_path.with_name("chat_conversations.json")
         self.file_path.parent.mkdir(parents=True, exist_ok=True)
         self.auth_keys_path.parent.mkdir(parents=True, exist_ok=True)
         self.gallery_path.parent.mkdir(parents=True, exist_ok=True)
+        self.chat_conversations_path.parent.mkdir(parents=True, exist_ok=True)
 
     @staticmethod
     def _load_json_list(file_path: Path) -> list[dict[str, Any]]:
@@ -72,6 +80,12 @@ class JSONStorageBackend(StorageBackend):
         """保存画廊条目到 JSON 文件"""
         self._save_json_list(self.gallery_path, items)
 
+    def load_chat_conversations(self) -> list[dict[str, Any]]:
+        return self._load_json_list(self.chat_conversations_path)
+
+    def save_chat_conversations(self, items: list[dict[str, Any]]) -> None:
+        self._save_json_list(self.chat_conversations_path, items)
+
     def health_check(self) -> dict[str, Any]:
         """健康检查"""
         try:
@@ -87,6 +101,8 @@ class JSONStorageBackend(StorageBackend):
                 "auth_keys_file_path": str(self.auth_keys_path),
                 "gallery_file_exists": self.gallery_path.exists(),
                 "gallery_file_path": str(self.gallery_path),
+                "chat_conversations_file_exists": self.chat_conversations_path.exists(),
+                "chat_conversations_file_path": str(self.chat_conversations_path),
             }
         except Exception as e:
             return {
@@ -106,4 +122,6 @@ class JSONStorageBackend(StorageBackend):
             "auth_keys_file_exists": self.auth_keys_path.exists(),
             "gallery_file_path": str(self.gallery_path),
             "gallery_file_exists": self.gallery_path.exists(),
+            "chat_conversations_file_path": str(self.chat_conversations_path),
+            "chat_conversations_file_exists": self.chat_conversations_path.exists(),
         }

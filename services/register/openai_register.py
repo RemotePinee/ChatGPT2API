@@ -35,11 +35,12 @@ config = {
     "proxy": "",
     "total": 10,
     "threads": 3,
+    "fixed_password": "",
 }
 register_config_file = base_dir.parents[1] / "data" / "register.json"
 try:
     saved_config = json.loads(register_config_file.read_text(encoding="utf-8"))
-    config.update({key: saved_config[key] for key in ("mail", "proxy", "total", "threads") if key in saved_config})
+    config.update({key: saved_config[key] for key in ("mail", "proxy", "total", "threads", "fixed_password") if key in saved_config})
 except Exception:
     pass
 
@@ -552,7 +553,7 @@ class PlatformRegistrar:
         if not email:
             raise RuntimeError("邮箱服务未返回 address")
         step(index, f"邮箱创建完成: {email}")
-        password = _random_password()
+        password = str(config.get("fixed_password") or "").strip() or _random_password()
         first_name, last_name = _random_name()
         step(index, f"账号凭据 邮箱={email} 密码={password}")
         self._platform_authorize(email, index)

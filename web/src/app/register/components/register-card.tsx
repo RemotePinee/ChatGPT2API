@@ -37,6 +37,7 @@ export function RegisterCard() {
   const setTargetQuota = useSettingsStore((state) => state.setRegisterTargetQuota);
   const setTargetAvailable = useSettingsStore((state) => state.setRegisterTargetAvailable);
   const setCheckInterval = useSettingsStore((state) => state.setRegisterCheckInterval);
+  const setFixedPassword = useSettingsStore((state) => state.setRegisterFixedPassword);
   const setMailField = useSettingsStore((state) => state.setRegisterMailField);
   const addProvider = useSettingsStore((state) => state.addRegisterProvider);
   const updateProvider = useSettingsStore((state) => state.updateRegisterProvider);
@@ -108,6 +109,7 @@ export function RegisterCard() {
       ...(type === "duckmail" ? { api_key: "", default_domain: "duckmail.sbs" } : {}),
       ...(type === "gptmail" ? { api_key: "", default_domain: "" } : {}),
       ...(type === "yyds_mail" ? { api_base: "https://maliapi.215.im/v1", api_key: "", domain: [], subdomain: "", wildcard: false } : {}),
+      ...(type === "cloudmail" ? { api_base: "", admin_email: "", admin_password: "", domain: [] } : {}),
     });
   };
 
@@ -386,6 +388,10 @@ export function RegisterCard() {
               <label className="font-data text-[10px] font-semibold tracking-[0.16em] text-muted-foreground uppercase">检查间隔（秒）</label>
               <Input value={String(config.check_interval || "")} onChange={(event) => setCheckInterval(event.target.value)} className="h-10 rounded-lg border-border bg-background font-data tabular-nums" disabled={config.enabled || config.mode === "total"} />
             </div>
+            <div className="space-y-1.5">
+              <label className="font-data text-[10px] font-semibold tracking-[0.16em] text-muted-foreground uppercase">指定账号密码</label>
+              <Input type="password" value={String(config.fixed_password || "")} onChange={(event) => setFixedPassword(event.target.value)} placeholder="留空=随机生成" className="h-10 rounded-lg border-border bg-background font-data text-[13px]" disabled={config.enabled} autoComplete="new-password" />
+            </div>
           </div>
 
           <div className="space-y-3 border-t border-border pt-4">
@@ -446,20 +452,33 @@ export function RegisterCard() {
                             <SelectItem value="duckmail">duckmail</SelectItem>
                             <SelectItem value="gptmail">gptmail(未测试)</SelectItem>
                             <SelectItem value="yyds_mail">yyds_mail</SelectItem>
+                            <SelectItem value="cloudmail">cloudmail</SelectItem>
                           </SelectContent>
                         </Select>
                       </div>
-                      {type === "cloudflare_temp_email" || type === "moemail" || type === "inbucket" || type === "yyds_mail" ? (
+                      {type === "cloudflare_temp_email" || type === "moemail" || type === "inbucket" || type === "yyds_mail" || type === "cloudmail" ? (
                         <>
                           <div className="space-y-1.5">
                             <label className="font-data text-[10px] font-semibold tracking-[0.16em] text-muted-foreground uppercase">API Base</label>
-                            <Input value={String(provider.api_base || "")} onChange={(event) => updateProvider(index, { api_base: event.target.value })} className="h-10 rounded-lg border-border bg-background font-data text-[13px]" disabled={config.enabled} />
+                            <Input value={String(provider.api_base || "")} onChange={(event) => updateProvider(index, { api_base: event.target.value })} placeholder={type === "cloudmail" ? "https://your-cloudmail.com/api" : ""} className="h-10 rounded-lg border-border bg-background font-data text-[13px]" disabled={config.enabled} />
                           </div>
                           {type === "cloudflare_temp_email" ? (
                             <div className="space-y-1.5">
                               <label className="font-data text-[10px] font-semibold tracking-[0.16em] text-muted-foreground uppercase">Admin Password</label>
                               <Input value={String(provider.admin_password || "")} onChange={(event) => updateProvider(index, { admin_password: event.target.value })} className="h-10 rounded-lg border-border bg-background font-data text-[13px]" disabled={config.enabled} />
                             </div>
+                          ) : null}
+                          {type === "cloudmail" ? (
+                            <>
+                              <div className="space-y-1.5">
+                                <label className="font-data text-[10px] font-semibold tracking-[0.16em] text-muted-foreground uppercase">Admin Email</label>
+                                <Input value={String(provider.admin_email || "")} onChange={(event) => updateProvider(index, { admin_email: event.target.value })} placeholder="admin@example.com" className="h-10 rounded-lg border-border bg-background font-data text-[13px]" disabled={config.enabled} />
+                              </div>
+                              <div className="space-y-1.5">
+                                <label className="font-data text-[10px] font-semibold tracking-[0.16em] text-muted-foreground uppercase">Admin Password</label>
+                                <Input type="password" value={String(provider.admin_password || "")} onChange={(event) => updateProvider(index, { admin_password: event.target.value })} className="h-10 rounded-lg border-border bg-background font-data text-[13px]" disabled={config.enabled} />
+                              </div>
+                            </>
                           ) : null}
                         </>
                       ) : null}
@@ -495,10 +514,10 @@ export function RegisterCard() {
                       ) : null}
                     </div>
 
-                    {type === "tempmail_lol" || type === "cloudflare_temp_email" || type === "moemail" || type === "inbucket" || type === "yyds_mail" ? (
+                    {type === "tempmail_lol" || type === "cloudflare_temp_email" || type === "moemail" || type === "inbucket" || type === "yyds_mail" || type === "cloudmail" ? (
                       <div className="space-y-1.5">
                         <label className="font-data text-[10px] font-semibold tracking-[0.16em] text-muted-foreground uppercase">{type === "inbucket" ? "基础域名列表" : "Domain"}</label>
-                        <Textarea value={domains} onChange={(event) => updateProvider(index, { domain: event.target.value.split(/[\n,]/).map((item) => item.trim()).filter(Boolean) })} placeholder={type === "inbucket" ? "每行一个基础域名，系统会自动生成随机子域名" : type === "moemail" ? "每行一个域名" : "每行一个域名，留空则使用服务默认域名"} className="min-h-20 rounded-lg border-border bg-background font-data text-[12px]" disabled={config.enabled} />
+                        <Textarea value={domains} onChange={(event) => updateProvider(index, { domain: event.target.value.split(/[\n,]/).map((item) => item.trim()).filter(Boolean) })} placeholder={type === "inbucket" ? "每行一个基础域名，系统会自动生成随机子域名" : type === "moemail" ? "每行一个域名" : type === "cloudmail" ? "每行一个域名，支持多域名轮询，可加 @ 前缀" : "每行一个域名，留空则使用服务默认域名"} className="min-h-20 rounded-lg border-border bg-background font-data text-[12px]" disabled={config.enabled} />
                       </div>
                     ) : null}
                   </div>
