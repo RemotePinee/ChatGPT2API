@@ -51,6 +51,15 @@ class ChatConversationModel(Base):
     data = Column(Text, nullable=False)
 
 
+class CDKCodeModel(Base):
+    """CDK 兑换码数据模型"""
+    __tablename__ = "cdk_codes"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    cdk_id = Column(String(64), unique=True, nullable=False, index=True)
+    data = Column(Text, nullable=False)
+
+
 class DatabaseStorageBackend(StorageBackend):
     """数据库存储后端（支持 SQLite、PostgreSQL、MySQL 等）"""
 
@@ -106,7 +115,15 @@ class DatabaseStorageBackend(StorageBackend):
     def save_chat_conversations(self, items: list[dict[str, Any]]) -> None:
         self._save_rows(ChatConversationModel, items, "id", "conversation_id")
 
-    def _load_rows(self, model: type[AccountModel] | type[AuthKeyModel] | type[GalleryItemModel] | type[ChatConversationModel]) -> list[dict[str, Any]]:
+    def load_cdk_codes(self) -> list[dict[str, Any]]:
+        """从数据库加载 CDK 兑换码数据"""
+        return self._load_rows(CDKCodeModel)
+
+    def save_cdk_codes(self, items: list[dict[str, Any]]) -> None:
+        """保存 CDK 兑换码数据到数据库"""
+        self._save_rows(CDKCodeModel, items, "id", "cdk_id")
+
+    def _load_rows(self, model: type[AccountModel] | type[AuthKeyModel] | type[GalleryItemModel] | type[ChatConversationModel] | type[CDKCodeModel]) -> list[dict[str, Any]]:
         session = self.Session()
         try:
             items = []

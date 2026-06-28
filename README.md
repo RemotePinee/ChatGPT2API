@@ -142,6 +142,14 @@ environment:
 - 按日期范围检索
 - 单图删除与批量清理
 
+### CDK 管理
+
+- CDK 兑换码生成与管理，支持单次使用和多次使用两种模式
+- 批量生成 CDK，支持自定义过期时间和配额配置
+- 灵活的配额控制：日额度、月额度、总额度，支持独立开关
+- 管理端支持查看、编辑、删除 CDK（包括已使用的 CDK）
+- 用户端 CDK 兑换入口，自动创建账号并分配权限
+
 ### 配置与备份
 
 - 全局 `auth-key` + 用户级密钥二级权限体系（admin / user），用户密钥可设置普通 / 高级等级
@@ -203,6 +211,18 @@ environment:
 图片管理：
 
 ![image-manager](assets/image-manager.png)
+
+CDK 管理：
+
+![cdk-manage](assets/cdk-manage.png)
+
+CDK 兑换：
+
+![cdk-reg](assets/cdk-reg.png)
+
+CDK 使用：
+
+![cdk-get](assets/cdk-get.png)
 
 ## API
 

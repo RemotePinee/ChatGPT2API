@@ -45,6 +45,14 @@ class StorageBackend(ABC):
         """保存所有聊天会话；默认 noop，子类按需覆盖。"""
         return None
 
+    def load_cdk_codes(self) -> list[dict[str, Any]]:
+        """加载所有 CDK 兑换码；默认返回空列表。"""
+        return []
+
+    def save_cdk_codes(self, items: list[dict[str, Any]]) -> None:
+        """保存所有 CDK 兑换码；默认 noop，子类按需覆盖。"""
+        return None
+
     @abstractmethod
     def health_check(self) -> dict[str, Any]:
         """健康检查，返回存储后端状态"""

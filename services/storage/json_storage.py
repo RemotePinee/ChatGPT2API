@@ -16,15 +16,18 @@ class JSONStorageBackend(StorageBackend):
         auth_keys_path: Path | None = None,
         gallery_path: Path | None = None,
         chat_conversations_path: Path | None = None,
+        cdk_codes_path: Path | None = None,
     ):
         self.file_path = file_path
         self.auth_keys_path = auth_keys_path or file_path.with_name("auth_keys.json")
         self.gallery_path = gallery_path or file_path.with_name("gallery.json")
         self.chat_conversations_path = chat_conversations_path or file_path.with_name("chat_conversations.json")
+        self.cdk_codes_path = cdk_codes_path or file_path.with_name("cdk_codes.json")
         self.file_path.parent.mkdir(parents=True, exist_ok=True)
         self.auth_keys_path.parent.mkdir(parents=True, exist_ok=True)
         self.gallery_path.parent.mkdir(parents=True, exist_ok=True)
         self.chat_conversations_path.parent.mkdir(parents=True, exist_ok=True)
+        self.cdk_codes_path.parent.mkdir(parents=True, exist_ok=True)
 
     @staticmethod
     def _load_json_list(file_path: Path) -> list[dict[str, Any]]:
@@ -85,6 +88,14 @@ class JSONStorageBackend(StorageBackend):
 
     def save_chat_conversations(self, items: list[dict[str, Any]]) -> None:
         self._save_json_list(self.chat_conversations_path, items)
+
+    def load_cdk_codes(self) -> list[dict[str, Any]]:
+        """从 JSON 文件加载 CDK 兑换码数据"""
+        return self._load_json_list(self.cdk_codes_path)
+
+    def save_cdk_codes(self, items: list[dict[str, Any]]) -> None:
+        """保存 CDK 兑换码数据到 JSON 文件"""
+        self._save_json_list(self.cdk_codes_path, items)
 
     def health_check(self) -> dict[str, Any]:
         """健康检查"""

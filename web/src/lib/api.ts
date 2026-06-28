@@ -7,6 +7,7 @@ export type AccountStatus = "正常" | "限流" | "异常" | "禁用";
 export type ImageModel = "gpt-image-2" | "codex-gpt-image-2";
 export type AuthRole = "admin" | "user";
 export type AccountTier = "free" | "premium";
+export type CDKStatus = "active" | "used" | "expired";
 
 export type Account = {
   access_token: string;
@@ -1198,4 +1199,119 @@ export async function* streamChat(
   } finally {
     try { reader.releaseLock(); } catch { /* noop */ }
   }
+}
+
+// ── CDK (兑换码) ──────────────────────────────────────────────
+
+export type CDKCode = {
+  id: string;
+  status: CDKStatus;
+  usage_type: "single" | "multiple";
+  max_uses: number;
+  current_uses: number;
+  created_at: string;
+  expires_at: string | null;
+  used_at: string | null;
+  used_by_name: string | null;
+  usage_records: Array<{
+    used_at: string;
+    user_name: string;
+    key_id: string | null;
+  }>;
+  quota_config: {
+    account_tier: AccountTier;
+    image_daily_quota: number;
+    image_daily_unlimited: boolean;
+    image_monthly_quota: number;
+    image_monthly_unlimited: boolean;
+    image_total_quota: number;
+    image_total_unlimited: boolean;
+    chat_daily_quota: number;
+    chat_daily_unlimited: boolean;
+    chat_monthly_quota: number;
+    chat_monthly_unlimited: boolean;
+    chat_total_quota: number;
+    chat_total_unlimited: boolean;
+  };
+  code?: string; // 仅在生成时返回
+};
+
+export type CDKStats = {
+  total: number;
+  active: number;
+  used: number;
+  expired: number;
+};
+
+export type BatchCreateCDKPayload = {
+  count: number;
+  expires_at?: string | null;
+  usage_type?: "single" | "multiple";
+  max_uses?: number;
+  custom_code?: string | null;
+  quota_config: {
+    account_tier: AccountTier;
+    image_daily_quota: number;
+    image_daily_unlimited: boolean;
+    image_monthly_quota: number;
+    image_monthly_unlimited: boolean;
+    image_total_quota: number;
+    image_total_unlimited: boolean;
+    chat_daily_quota: number;
+    chat_daily_unlimited: boolean;
+    chat_monthly_quota: number;
+    chat_monthly_unlimited: boolean;
+    chat_total_quota: number;
+    chat_total_unlimited: boolean;
+  };
+};
+
+export async function batchCreateCDK(payload: BatchCreateCDKPayload) {
+  return httpRequest<{ items: CDKCode[]; stats: CDKStats }>("/api/cdk/batch-create", {
+    method: "POST",
+    body: payload,
+  });
+}
+
+export async function fetchCDKList(filters: { status?: CDKStatus | null; limit?: number; offset?: number } = {}) {
+  return httpRequest<{ items: CDKCode[]; total: number; limit: number; offset: number }>("/api/cdk/list", {
+    method: "POST",
+    body: {
+      status: filters.status || null,
+      limit: filters.limit || 100,
+      offset: filters.offset || 0,
+    },
+  });
+}
+
+export async function fetchCDKStats() {
+  return httpRequest<{ stats: CDKStats }>("/api/cdk/stats");
+}
+
+export async function redeemCDK(code: string, userName: string) {
+  return httpRequest<{ success: boolean; user_key: UserKey; key: string; message: string }>(
+    "/api/cdk/redeem",
+    {
+      method: "POST",
+      body: { code, user_name: userName },
+      redirectOnUnauthorized: false,
+    },
+  );
+}
+
+export async function deleteCDK(codeId: string, force: boolean = false) {
+  return httpRequest<{ success: boolean; stats: CDKStats }>(`/api/cdk/${codeId}?force=${force}`, {
+    method: "DELETE",
+  });
+}
+
+export async function updateCDK(codeId: string, data: {
+  expires_at?: string | null;
+  quota_config?: Record<string, any>;
+  max_uses?: number;
+}) {
+  return httpRequest<{ success: boolean; item: CDKCode; stats: CDKStats }>(`/api/cdk/${codeId}`, {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
 }

@@ -20,6 +20,7 @@ const adminNavItems = [
   { href: "/logs", label: "日志管理" },
   { href: "/settings", label: "设置" },
   { href: "/keys", label: "用户密钥" },
+  { href: "/cdk", label: "CDK 管理" },
 ];
 
 const userNavItems = [

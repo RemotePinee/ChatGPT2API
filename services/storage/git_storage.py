@@ -24,6 +24,7 @@ class GitStorageBackend(StorageBackend):
         auth_keys_file_path: str = "auth_keys.json",
         gallery_file_path: str = "gallery.json",
         chat_conversations_file_path: str = "chat_conversations.json",
+        cdk_codes_file_path: str = "cdk_codes.json",
         local_cache_dir: Path | None = None,
     ):
         self.repo_url = repo_url
@@ -33,6 +34,7 @@ class GitStorageBackend(StorageBackend):
         self.auth_keys_file_path = auth_keys_file_path
         self.gallery_file_path = gallery_file_path
         self.chat_conversations_file_path = chat_conversations_file_path
+        self.cdk_codes_file_path = cdk_codes_file_path
         
         # 本地缓存目录
         if local_cache_dir is None:
@@ -149,6 +151,22 @@ class GitStorageBackend(StorageBackend):
             self._save_json_file(self.chat_conversations_file_path, items, "Update chat conversations")
         except Exception as e:
             print(f"[git-storage] save chat_conversations failed: {e}")
+            raise e
+
+    def load_cdk_codes(self) -> list[dict[str, Any]]:
+        """从 Git 仓库加载 CDK 兑换码数据"""
+        try:
+            return self._load_json_file(self.cdk_codes_file_path)
+        except Exception as e:
+            print(f"[git-storage] load cdk_codes failed: {e}")
+            return []
+
+    def save_cdk_codes(self, items: list[dict[str, Any]]) -> None:
+        """保存 CDK 兑换码数据到 Git 仓库"""
+        try:
+            self._save_json_file(self.cdk_codes_file_path, items, "Update CDK codes")
+        except Exception as e:
+            print(f"[git-storage] save cdk_codes failed: {e}")
             raise e
 
     def _load_json_file(self, file_path: str) -> list[dict[str, Any]]:
